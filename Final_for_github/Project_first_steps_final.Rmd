@@ -1,0 +1,469 @@
+---
+title: "project_first_steps"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+STEP 1 - CASES EXTRACTION
+
+```{r}
+
+getwd()
+setwd("/rds/general/project/hda_students_data/live/Group7/General/Sarvesh/Scripts")
+
+library(data.table)
+library(openxlsx)
+library(tidyverse)
+
+# read Biobank dataset
+mydata=data.frame(fread("/rds/general/user/ems2817/projects/hda_students_data/live/Group7/General/ukb26390.csv"))
+print(mydata$X40006.0.0) # Baseline cancer only, since consequent cancers may be explained by the previous
+
+# determine column of interest
+cancer_ICD_col<- (colnames(mydata)[grep("40006",colnames(mydata))])
+cancer_ICD_col
+
+# codings dataset load
+mycoding=read.csv("/rds/general/user/ems2817/projects/hda_students_data/live/Group7/General/Codings_Showcase.csv")
+
+# look at field of interest (19 = ICD10)
+coding_id="19"
+print(head(mycoding))
+mycoding_field=mycoding[which(mycoding[,1]==coding_id),]
+head(mycoding_field)
+mycoding_field=mycoding_field[,-1]
+rownames(mycoding_field)=mycoding_field[,1]
+print(head(rownames(mycoding_field)))
+
+# Recoded categories:
+as.character(mycoding_field[as.character(mydata$X40006.0.0),"Meaning"])
+mycoding_field[,1]
+
+# Skin cancer
+head(mycoding_field)
+
+# Create list of values equated to skin cancer
+skincancer =c(c(paste0("C", 430:449)))
+
+# Filter coding fields based on cancer of interest
+coding_skincancer = filter(mycoding_field, Value %in% skincancer)
+coding_skincancer
+
+# Show results of coding fields that are for cancer of interest
+mycoding_skincancer=coding_skincancer[,-1]
+rownames(coding_skincancer)=coding_skincancer[,1]
+print(coding_skincancer)
+coding_skincancer[,1]
+
+codes_skincancer = as.character(coding_skincancer[,1])
+print(codes_skincancer)
+
+# Extract skin cancer cases
+mydata_C43_C44 = subset(mydata,X40006.0.0 %in% codes_skincancer) 
+
+withdrawn=as.character(read.csv("/rds/general/project/hda_students_data/live/Group7/General/w19266_20200204.csv")[,1])
+mydata_C43_C44<-filter(mydata_C43_C44,!(eid %in% withdrawn))
+
+
+# Save mydata_C43_C44
+saveRDS(mydata_C43_C44,"/rds/general/project/hda_students_data/live/Group7/General/Final/mydata_C43_C44.rds")
+```
+
+Age of diagnosis of melanoma/skin cancer: 84
+
+Here we need a specific date / age of diagnosis for each participants 
+We will compare this to date of comorbidity 
+
+```{r}
+
+Cancer_year <- (colnames(mydata_C43_C44)[grep("84",colnames(mydata_C43_C44))])
+print(head(Cancer_year,n=10))
+
+head(mydata_C43_C44$X84.0.0)
+head(mydata_C43_C44$X84.0.1)
+head(mydata_C43_C44$X84.0.2)
+head(mydata_C43_C44$X84.0.3)
+head(mydata_C43_C44$X84.0.4)
+head(mydata_C43_C44$X84.0.5)
+
+cancer_year_0<-mydata_C43_C44$X84.0.0
+```
+
+
+
+TO DO --> uniformalize for age 
+
+```{r}
+
+```
+
+
+
+
+```{r}
+age_cancer_diagnosis<- (colnames(mydata_C43_C44)[grep("40008",colnames(mydata_C43_C44))])
+print(head(age_cancer_diagnosis,n=20))
+
+names(mydata_C43_C44)[names(mydata_C43_C44) == "X40008.0.0"] <- "age_cancer_diagnosis"
+sum(is.na(mydata_C43_C44$age_cancer_diagnosis)) # 0 missing values
+hist(mydata_C43_C44$age_cancer_diagnosis)
+```
+
+
+STEP 2 - COMORBIDITIES 
+ 
+ A- Non cancer illness-code, self reported
+ - Work out how we can extract comorbidities throughout all follow-up times
+ 
+ 
+ Include all numbers after the second zero
+ 
+```{r}
+
+
+comorbidity_col<- (colnames(mydata_C43_C44)[grep("20002",colnames(mydata_C43_C44))])
+comorbidity_col
+
+codes_comorbidity<-as.factor(mydata_C43_C44$X20002.0.0)
+
+comorbidity_prev<-sort(prop.table(table(codes_comorbidity)), decreasing=TRUE)
+top_comorbidity<-data.frame(comorbidity_prev)
+colnames(top_comorbidity)<-c('Value','freq')
+
+comorbidity_coding_id="6"
+mycoding_field=mycoding[which(mycoding[,1]==comorbidity_coding_id),]
+mycoding_field=mycoding_field[,-1]
+mycoding_field=data.frame(mycoding_field)
+
+
+comorbidities_full<- merge(x = top_comorbidity, y = mycoding_field, by = "Value", all = TRUE)
+top_comorbidity<-comorbidities_full[1:40,]
+
+
+```
+
+
+
+TO DO: Need to improve the count part to make it more efficient 
+
+```{r}
+###extract 20002.0.X
+head(mydata)
+mydata2 <- mydata
+pos_comor <- grep("X20002.0.", fixed=TRUE, colnames(mydata)) #Obtain column position of all comorbidities
+comor <- mydata[, pos_comor]
+
+###Function to obtain dictionary for the specific column
+mycoding=read.csv("/rds/general/user/ems2817/projects/hda_students_data/live/Group7/General/Codings_Showcase.csv")
+rename <- function(x, coding_id){
+  mycoding_field=mycoding[which(mycoding[,1]==coding_id),]
+  mycoding_field=mycoding_field[,-1]
+  mycoding_field$Values <- as.factor(mycoding_field$Value)
+  #mycoding_field$Values <- droplevels(mycoding_field$Values)
+  mycoding_field <- subset(mycoding_field, mycoding_field[,1] != -1)
+  rownames(mycoding_field)=mycoding_field[,1]
+  #level_names <- mycoding_field[,2]
+  #x <- as.factor(x)
+  #levels(x) <- level_names
+  return(mycoding_field)
+}
+
+###Get comorbidities by real name
+table(comor$X20002.0.0)
+comor_dict <- rename(comor$X20002.0.0, "6")
+#change na to 0 for code to work
+mydata2[, pos_comor] [is.na(mydata2[, pos_comor])] <- 0
+#substitute coding numbers with disease name
+for(i in 1:dim(mycoding_field)[1]){
+  mydata2[, pos_comor] <- apply(mydata2[,pos_comor], 2,function(x) {(gsub(comor_dict[i, "Value"], comor_dict[i, "Meaning"], x))})
+}
+
+###Function to count frequency each comorbidity (Very inefficient!!!!!!)
+all_comorbidity <- mydata2[, pos_comor]
+comorbidity_count <- data.frame(mycoding_field[, 2])
+for(k in 1:dim(mycoding_field)[1]){
+  count <- 0
+  for(i in 1:dim(all_comorbidity)[1]){
+    for(j in 1:dim(all_comorbidity)[2]){
+      if(all_comorbidity[i,j] == mycoding_field[k, 2]){
+        count <- count + 1
+      } 
+    }
+  }
+  comorbidity_count$count[k] <- count
+}
+
+
+```
+ 
+
+Date of diagnosis of comorbidity - code 87
+```{r}
+date_comorbidity="37"
+mycoding_date_comorbidity=mycoding[which(mycoding[,1]==date_comorbidity),]
+
+comorbidity_date<- (colnames(mydata_C43_C44)[grep("87",colnames(mydata_C43_C44))])
+comorbidity_date
+
+comorbidity_date_0<-mydata_C43_C44$X87.0.0
+```
+
+TO DO: uniformalize 
+
+
+```{r}
+diff_outcome_comorbidity <-cancer_year_0-comorbidity_date_0
+```
+
+Categorize depending on difference
+
+
+
+Comorbidity cancer : 20001 - coding 3
+
+```{r}
+cancer_comorbidity="20001"
+mycoding_cancer_comorbidity=mycoding[which(mycoding[,1]==cancer_comorbidity),]
+
+cancer_com<- (colnames(mydata_C43_C44)[grep("20002",colnames(mydata_C43_C44))])
+cancer_com
+```
+
+```{r}
+###extract 20002.0.X
+head(mydata)
+mydata2 <- mydata
+pos_comor <- grep("X20004.0.", fixed=TRUE, colnames(mydata)) #Obtain column position of all comorbidities
+comor <- mydata[, pos_comor]
+
+###Function to obtain dictionary for the specific column
+mycoding=read.csv("/rds/general/user/ems2817/projects/hda_students_data/live/Group7/General/Codings_Showcase.csv")
+rename <- function(x, coding_id){
+  mycoding_field=mycoding[which(mycoding[,1]==coding_id),]
+  mycoding_field=mycoding_field[,-1]
+  mycoding_field$Values <- as.factor(mycoding_field$Value)
+  #mycoding_field$Values <- droplevels(mycoding_field$Values)
+  mycoding_field <- subset(mycoding_field, mycoding_field[,1] != -1)
+  rownames(mycoding_field)=mycoding_field[,1]
+  #level_names <- mycoding_field[,2]
+  #x <- as.factor(x)
+  #levels(x) <- level_names
+  return(mycoding_field)
+}
+
+###Get comorbidities by real name
+table(comor$X20002.0.0)
+comor_dict <- rename(comor$X20002.0.0, "3")
+#change na to 0 for code to work
+mydata2[, pos_comor] [is.na(mydata2[, pos_comor])] <- 0
+#substitute coding numbers with disease name
+for(i in 1:dim(mycoding_field)[1]){
+  mydata2[, pos_comor] <- apply(mydata2[,pos_comor], 2,function(x) {(gsub(comor_dict[i, "Value"], comor_dict[i, "Meaning"], x))})
+}
+
+###Function to count frequency each comorbidity (Very inefficient!!!!!!)
+all_comorbidity <- mydata2[, pos_comor]
+comorbidity_count <- data.frame(mycoding_field[, 2])
+for(k in 1:dim(mycoding_field)[1]){
+  count <- 0
+  for(i in 1:dim(all_comorbidity)[1]){
+    for(j in 1:dim(all_comorbidity)[2]){
+      if(all_comorbidity[i,j] == mycoding_field[k, 2]){
+        count <- count + 1
+      } 
+    }
+  }
+  comorbidity_count$count[k] <- count
+}
+
+```
+
+
+Cancer year/age of cancer comorbidity 84
+
+```{r}
+cancer_comorbidity_year="84"
+mycoding_cancer_comorbidity_year=mycoding[which(mycoding[,1]==cancer_comorbidity_year),]
+
+cancer_com_year<- (colnames(mydata_C43_C44)[grep("20002",colnames(mydata_C43_C44))])
+cancer_com_year
+```
+
+
+Within people who have comorbidities - did these occur before occurence of cancer?
+When we have a comorbidity that occured before melanoma, create categorical variable for time
+1
+3
+5
+10
+
+
+OPTION 2 FOR EXTRACTING COMORBIDITIES
+
+Extract all comorbidity columns
+```{r}
+mydata <- readRDS("/rds/general/project/hda_students_data/live/Group7/General/Eléonore/cases.rds")
+write.csv(mydata, "/rds/general/project/hda_students_data/live/Group7/General/Carolina/cases.csv")
+data <- mydata[1:10,]
+
+#load the field id list to be extracted
+myfields=unname(unlist(read.table("/rds/general/project/hda_students_data/live/Group7/General/Carolina/comorbidities.txt", header=FALSE)))
+
+
+
+# Extracting the column ids 
+column_id=grep("eid", colnames(mydata_C43_C44))
+found_fieldids=NULL
+for (k in 1:length(mydata_C43_C44)){
+  mygrep=grep(paste0("X",myfields[k],"."), fixed=TRUE, colnames(mydata_C43_C44))
+  if (length(mygrep)>0){
+    found_fieldids=c(found_fieldids, myfields[k])
+  }
+  column_id=c(column_id, mygrep)
+}
+#remove duplicates
+column_id2 <- unique(column_id)
+
+# Extracting required columns from dataset
+extracted<-data.frame(mydata_C43_C44) %>%
+          select(column_id2) # Path to change!
+
+saveRDS(extracted, "/rds/general/project/hda_students_data/live/Group7/General/Eléonore/extracted_comorb.rds")
+
+#Maintain only at baseline
+
+disease_baseline <- c()
+for (k in 1:length(myfields)){
+  disease_baseline[k] <-paste0("X",myfields[k],".0.0")
+}
+
+extracted_baseline <- extracted$V1
+disease_baseline2 <- c()
+for(k in 2:length(myfields)){
+  for(j in 1:dim(extracted)[2]){
+    if (disease_baseline[k] == colnames(extracted)[j]){
+      disease_baseline2[k] <- disease_baseline[k]
+      extracted_baseline <- cbind(extracted_baseline, mydata_C43_C44[disease_baseline2[k]])
+    }
+  }
+}
+
+
+disease_count <- c()
+column_names <- colnames(extracted_baseline)
+for(i in 1:dim(extracted_baseline)[2]){
+  disease_count[i] <- sum((extracted_baseline[, i]) >= 1, na.rm = TRUE)
+}
+
+disease_count
+names(disease_count) <- column_names
+sort(disease_count)
+sorted_disease_count <- sort(disease_count, decreasing=TRUE)
+disease_count_top50 <- sorted_disease_count[1:50]
+disease_count_top50_prop <- disease_count_top50/ dim(extracted)[1]
+diseases_name <- names(disease_count_top50_prop)
+table_disease <- data.frame("disease" = diseases_name, "count" = round(unname(disease_count_top50),3),
+                              "prop" = round(unname(disease_count_top50_prop), 3))
+table_disease
+
+```
+
+X40006 --> cancer, they all  have melanoma 
+
+Need to recode to data field in order to get comorbidity name 
+How do we get coding for each of these?
+
+
+STEP 3 - COVARIATES EXTRACTION 
+
+AGE - year of birth 
+
+```{r}
+DEM_age<- (colnames(mydata_C43_C44)[grep("34",colnames(mydata_C43_C44))])
+print(head(DEM_age))
+
+names(mydata_C43_C44)[names(mydata_C43_C44) == "X34.0.0"] <- "DEM_age"
+
+
+prop.table(table(mydata_C43_C44$DEM_age))
+
+sum(is.na(mydata_C43_C44$DEM_age))
+```
+
+ETHNICITY
+
+```{r}
+DEM_ethnicity<- (colnames(mydata_C43_C44)[grep("21000",colnames(mydata_C43_C44))])
+print(head(DEM_ethnicity))
+
+names(melanoma_cases)[names(mydata_C43_C44) == "X21000.0.0"] <- "DEM_ethnic"
+
+
+coding_ethnic='1001'
+mycoding_field=mycoding[which(mycoding[,1]==coding_ethnic),]
+mycoding_field=mycoding_field[,-1]
+
+
+prop.table(table(melanoma_cases$DEM_ethnic))
+
+melanoma_cases$DEM_ethnic<-as.factor(mycoding_field['Meaning'])
+
+sum(is.na(mydata_C43_C44$DEM_ethnic))
+```
+
+SEX
+
+```{r}
+
+
+DEM_sex<- (colnames(mydata_C43_C44)[grep("31",colnames(mydata_C43_C44))])
+print(head(DEM_sex))
+
+names(mydata_C43_C44)[names(mydata_C43_C44) == "X31.0.0"] <- "DEM_sex"
+
+prop.table(table(mydata_C43_C44$DEM_sex))
+
+t=table(mydata_C43_C44$DEM_sex)
+a=t[1]
+b=t[2]
+c=round(a/nrow(mydata_C43_C44)*100 , 2)
+d=round(b/nrow(mydata_C43_C44)*100 , 2)
+
+c
+d
+
+sum(is.na(mydata_C43_C44$DEM_sex))
+```
+
+Describe our population
+Look at distribution of individual covariates
+Check for missingness
+Correlation?
+
+```{r}
+#install.packages("ukbtools")
+
+library(ukbtools)
+?ukbtools
+
+my_ukb_data<-ukb_df(mydata_C43_C44)
+```
+
+
+STEP 4 - MATCHING - CONTROLS
+
+Remember to remove participants with no consent
+
+```{r}
+
+
+```
+
+
+STEP 5-
+Data imputation 
+research
+
